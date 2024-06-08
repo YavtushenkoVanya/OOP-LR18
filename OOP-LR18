@@ -1,0 +1,178 @@
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+namespace ProcessManager
+{
+    static class Program
+    {
+        [STAThread]
+        static void Main()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MainForm());
+        }
+    }
+
+    public class MainForm : Form
+    {
+        private ListView processListView;
+        private ContextMenuStrip contextMenuStrip;
+        private ToolStripMenuItem infoToolStripMenuItem;
+        private ToolStripMenuItem stopToolStripMenuItem;
+        private ToolStripMenuItem refreshToolStripMenuItem;
+        private ToolStripMenuItem exportToolStripMenuItem;
+
+        public MainForm()
+        {
+            InitializeComponent();
+            LoadProcesses();
+        }
+
+        private void InitializeComponent()
+        {
+            processListView = new ListView();
+            contextMenuStrip = new ContextMenuStrip();
+            infoToolStripMenuItem = new ToolStripMenuItem();
+            stopToolStripMenuItem = new ToolStripMenuItem();
+            refreshToolStripMenuItem = new ToolStripMenuItem();
+            exportToolStripMenuItem = new ToolStripMenuItem();
+
+            processListView.Dock = DockStyle.Fill;
+            processListView.View = View.Details;
+            processListView.Columns.Add("ID", 70);
+            processListView.Columns.Add("Name", 200);
+            processListView.Columns.Add("Threads", 70);
+            processListView.Columns.Add("Modules", 200);
+
+            infoToolStripMenuItem.Text = "Show Info";
+            infoToolStripMenuItem.Click += InfoToolStripMenuItem_Click;
+
+            stopToolStripMenuItem.Text = "Stop Process";
+            stopToolStripMenuItem.Click += StopToolStripMenuItem_Click;
+
+            refreshToolStripMenuItem.Text = "Refresh";
+            refreshToolStripMenuItem.Click += RefreshToolStripMenuItem_Click;
+
+            exportToolStripMenuItem.Text = "Export to Text File";
+            exportToolStripMenuItem.Click += ExportToolStripMenuItem_Click;
+
+            contextMenuStrip.Items.AddRange(new ToolStripItem[] { infoToolStripMenuItem, stopToolStripMenuItem, refreshToolStripMenuItem, exportToolStripMenuItem });
+
+            processListView.ContextMenuStrip = contextMenuStrip;
+
+            Controls.Add(processListView);
+
+            Text = "Process Manager";
+            Width = 600;
+            Height = 400;
+        }
+
+        private void LoadProcesses()
+        {
+            processListView.Items.Clear();
+            var processes = Process.GetProcesses();
+            foreach (var process in processes)
+            {
+                ListViewItem item = new ListViewItem(process.Id.ToString());
+                item.SubItems.Add(process.ProcessName);
+                item.SubItems.Add(process.Threads.Count.ToString());
+                item.SubItems.Add(GetModuleCount(process.Id).ToString());
+                processListView.Items.Add(item);
+            }
+        }
+
+        private void InfoToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (processListView.SelectedItems.Count > 0)
+            {
+                var selectedItem = processListView.SelectedItems[0];
+                int processId = int.Parse(selectedItem.SubItems[0].Text);
+                var process = Process.GetProcessById(processId);
+                MessageBox.Show($"Process Name: {process.ProcessName}\nID: {process.Id}\nThreads: {process.Threads.Count}\nModules: {GetModuleCount(processId)}");
+            }
+        }
+
+        private void StopToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (processListView.SelectedItems.Count > 0)
+            {
+                var selectedItem = processListView.SelectedItems[0];
+                int processId = int.Parse(selectedItem.SubItems[0].Text);
+                var process = Process.GetProcessById(processId);
+                process.Kill();
+                LoadProcesses();
+            }
+        }
+
+        private void RefreshToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            LoadProcesses();
+        }
+
+        private void ExportToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using (var saveFileDialog = new SaveFileDialog())
+            {
+                saveFileDialog.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*";
+                if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    using (var writer = new System.IO.StreamWriter(saveFileDialog.FileName))
+                    {
+                        foreach (ListViewItem item in processListView.Items)
+                        {
+                            writer.WriteLine($"ID: {item.SubItems[0].Text}, Name: {item.SubItems[1].Text}, Threads: {item.SubItems[2].Text}, Modules: {item.SubItems[3].Text}");
+                        }
+                    }
+                }
+            }
+        }
+
+        private int GetModuleCount(int processId)
+        {
+            int moduleCount = 0;
+            var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, (uint)processId);
+            if (snapshot != IntPtr.Zero)
+            {
+                MODULEENTRY32 me32 = new MODULEENTRY32();
+                me32.dwSize = (uint)Marshal.SizeOf(typeof(MODULEENTRY32));
+                if (Module32First(snapshot, ref me32))
+                {
+                    do
+                    {
+                        moduleCount++;
+                    } while (Module32Next(snapshot, ref me32));
+                }
+                CloseHandle(snapshot);
+            }
+            return moduleCount;
+        }
+
+        const uint TH32CS_SNAPMODULE = 0x00000008;
+        [DllImport("kernel32.dll")]
+        static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+        [DllImport("kernel32.dll")]
+        static extern bool Module32First(IntPtr hSnapshot, ref MODULEENTRY32 lpme);
+        [DllImport("kernel32.dll")]
+        static extern bool Module32Next(IntPtr hSnapshot, ref MODULEENTRY32 lpme);
+        [DllImport("kernel32.dll")]
+        static extern bool CloseHandle(IntPtr hHandle);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MODULEENTRY32
+        {
+            public uint dwSize;
+            public uint th32ModuleID;
+            public uint th32ProcessID;
+            public uint GlblcntUsage;
+            public uint ProccntUsage;
+            public IntPtr modBaseAddr;
+            public uint modBaseSize;
+            public IntPtr hModule;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szModule;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExePath;
+        }
+    }
+}
